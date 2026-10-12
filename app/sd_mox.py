@@ -20,6 +20,7 @@ import pika
 import requests
 import structlog.stdlib
 import xmltodict
+from more_itertools import one
 from os2mo_helpers.mora_helpers import MoraHelper
 from ra_utils.headers import TokenSettings
 from sd_connector import SDConnector
@@ -727,32 +728,27 @@ class SDMox(SDMoxInterface):
         }
 
     def _get_dar_address(self, addrid):
-        for addrtype in (
-            "adresser",
-            "adgangsadresser",
-            "historik/adresser",
-            "historik/adgangsadresser",
+        for addrtype, betegnelse in (
+            ("adresser", "adressebetegnelse"),
+            ("husnumre", "adgangsadressebetegnelse"),
         ):
             try:
                 r = requests.get(
-                    "https://dawa.aws.dk/" + addrtype,
+                    "https://adressevaelger.dk/" + addrtype,
                     params=[
-                        ("id", addrid),
-                        ("noformat", "1"),
-                        ("struktur", "mini"),
+                        ("id_lokalids", addrid),
+                        ("token", "adressevaelger123"),
                     ],
                 )
-                addrobjs = r.json()
+                # Adressevælgeren replies 404 if the uuid was not found
+                if r.status_code == 404:
+                    continue
                 r.raise_for_status()
-                if addrobjs:
-                    # found, escape loop!
-                    break
+                return one(r.json()[addrtype])[betegnelse]
             except Exception as e:
                 raise SDMoxError("Fejlende opslag i DAR for " + addrid) from e
-        else:
-            raise SDMoxError("Addresse ikke fundet i DAR: {!r}".format(addrid))
 
-        return addrobjs.pop()["betegnelse"]
+        raise SDMoxError("Addresse ikke fundet i DAR: {!r}".format(addrid))
 
     def _grouped_addresses(self, details):
         def get_scope_and_key(address_type):
